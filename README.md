@@ -30,9 +30,12 @@ When you're finished, use `//mh pause`. Your WS and HP settings stay in place un
 | --- | --- |
 | `//mh set ws <name>` | Choose a weaponskill, such as `//mh set ws King's Justice`. |
 | `//mh set hp <1-100>` | Choose the enemy HP percentage at which to start using your WS. |
+| `//mh set am3 <on/off>` | Enable or disable Mythic Aftermath Lv.3 maintenance (default: off). |
+| `//mh set am3 <seconds>` | Set when to start saving TP before AM3 expires (default: 15 seconds). Does not enable or disable maintenance. |
 | `//mh start` | Start watching your engaged target. |
 | `//mh pause` | Stop using weaponskills automatically. |
-| `//mh info` | Show your selected WS and HP threshold. |
+| `//mh info` | Show your selected WS, HP threshold, and AM3 settings. |
+| `//mh debug` | Explain what is blocking a WS and show AM3 buff status. |
 | `//mh set ws auto` | Let your equipped weapon choose the WS again. |
 | `//mh` | Show help and settings. |
 
@@ -54,6 +57,31 @@ Your own WS choice always takes priority. Otherwise, MagianHelper checks your ma
 Use `//mh info` to see which WS it has selected. If it shows `not set`, choose one with `//mh set ws <name>` before starting. If the chosen WS isn't currently available to you, MagianHelper waits.
 
 Empyrean weapons aren't included because their upgrade trials use different objectives. Ergon weapons, Vigil weapons, and unfinished weapon precursors also need a manual WS choice. Shields and instruments have no associated WS, and self-targeting weaponskills aren't supported.
+
+## Maintain Mythic AM3
+
+If you're working on a Mythic, MagianHelper can help keep Aftermath Lv.3 (AM3) up while you work on your trial. It's off by default. To turn it on, equip your Mythic and enter:
+
+```text
+//mh set am3 on
+//mh start
+```
+
+MagianHelper will first save up to 3,000 TP and use your Mythic's WS to get AM3, even if the enemy is still above your chosen HP percentage. Once AM3 is up, it goes back to using your selected WS at your usual HP threshold.
+
+By default, it starts saving TP again when AM3 has 15 seconds left. If you'd like a little more time to build TP, you can change that:
+
+```text
+//mh set am3 20
+```
+
+With this setting, normal WS use continues until AM3 has 20 seconds left. Then MagianHelper holds your TP until the buff wears off. Even if you reach 3,000 TP with 10 seconds remaining, it waits. Once AM3 is gone and you have 3,000 TP, it uses your Mythic's WS again without waiting for the enemy's HP to drop.
+
+You can use any whole number of seconds, including `0` if you only want to start saving after AM3 expires. Setting the number doesn't turn AM3 maintenance on; use `//mh set am3 on` for that. To turn it off, use `//mh set am3 off`. These settings last until you reload the addon.
+
+MagianHelper watches the buff itself to tell when it will wear off. If you load the addon while AM3 is already up, it may hold TP until the game supplies its remaining duration.
+
+This works with the Mythics listed above, equipped in your main hand or ranged slot. If both slots have a Mythic, the main-hand weapon takes priority. You can still choose a different WS for your trial; MagianHelper only switches to the Mythic's WS when it needs to apply AM3. Without a Mythic equipped, it follows your normal WS and HP settings.
 
 ## A few things to keep in mind
 

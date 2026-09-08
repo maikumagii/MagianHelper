@@ -1,6 +1,6 @@
 _addon.name = 'MagianHelper'
 _addon.author = 'maikumagii'
-_addon.version = '1.2.2'
+_addon.version = '1.3.0'
 _addon.commands = {'mh', 'magianhelper'}
 
 local res = require('resources')
@@ -10,11 +10,15 @@ local hp_threshold = 100
 local selected_ws = nil
 local last_check = os.clock()
 local last_attempt = 'none'
+local am3_enabled = false
+local am3_save_seconds = 15
+local am3_expires_at = nil
+local AM3_BUFF_ID = 272
 
 -- Add exact English item names and weaponskill names here as needed.
 -- Matching by name covers upgrade stages that retain the same item name.
 -- Shields and instruments have no associated WS and are intentionally omitted.
-local weapon_defaults = {
+local mythic_defaults = {
     -- Mythic (20)
     ['Conqueror'] = "King's Justice",
     ['Glanzfaust'] = "Ascetic's Fury",
@@ -36,7 +40,9 @@ local weapon_defaults = {
     ['Kenkonken'] = 'Stringing Pummel',
     ['Terpsichore'] = 'Pyrrhic Kleos',
     ['Tupsimati'] = 'Omniscience',
+}
 
+local weapon_defaults = {
     -- Relic (14)
     ['Spharai'] = 'Final Heaven',
     ['Mandau'] = 'Mercy Stroke',
@@ -55,6 +61,9 @@ local weapon_defaults = {
 
 
 }
+for weapon, ws in pairs(mythic_defaults) do
+    weapon_defaults[weapon] = ws
+end
 
 local function message(text)
     windower.add_to_chat(207, 'MagianHelper: ' .. text)
@@ -73,10 +82,7 @@ local function find_ws(name)
     end
 end
 
-local function effective_ws()
-    if selected_ws then
-        return selected_ws
-    end
+local function equipped_ws(defaults)
     local items = windower.ffxi.get_items()
     local equipment = items and items.equipment
     if not equipment then return nil end
@@ -87,10 +93,27 @@ local function effective_ws()
         if index and index ~= 0 and bag ~= nil then
             local item = windower.ffxi.get_items(bag, index)
             local resource = item and res.items[item.id]
-            local name = resource and weapon_defaults[resource.en]
+            local name = resource and defaults[resource.en]
             if name then return find_ws(name) end
         end
     end
+end
+
+local function effective_ws()
+    return selected_ws or equipped_ws(weapon_defaults)
+end
+
+local function am3_status(player)
+    for _, id in pairs(player and player.buffs or {}) do
+        if id == AM3_BUFF_ID then
+            return true, am3_expires_at and math.max(0, am3_expires_at - os.time())
+        end
+    end
+    return false
+end
+
+local function am3_settings()
+    return ('AM3: %s; save window: %ss'):format(am3_enabled and 'on' or 'off', tostring(am3_save_seconds))
 end
 
 -- Use the same live checks for firing and for //mh debug diagnostics.
@@ -111,14 +134,32 @@ local function check_ws()
         return blocked('No valid enemy target.')
     end
     if not target.hpp or target.hpp <= 0 then return blocked('Target is dead or HP is unknown.') end
-    if target.hpp > hp_threshold then return blocked('Target HP is above threshold.') end
-    if (player.vitals.tp or 0) < 1000 then return blocked('Waiting for 1,000 TP.') end
     local ws = effective_ws()
+    local renewing_am3 = false
+    local mythic_ws = am3_enabled and equipped_ws(mythic_defaults)
+    if mythic_ws then
+        local active, remaining = am3_status(player)
+        if active and (not remaining or remaining <= am3_save_seconds) then
+            -- Buff presence is authoritative, even after its reported timer reaches zero.
+            return blocked(remaining and ('Saving TP for AM3; holding until buff wears (%.0fs left).'):format(remaining)
+                or 'Holding TP for AM3; waiting for buff duration update.')
+        elseif not active then
+            if (player.vitals.tp or 0) < 3000 then
+                return blocked('Saving for AM3: waiting for 3,000 TP regardless of target HP.')
+            end
+            ws = mythic_ws
+            renewing_am3 = true
+        end
+    end
+    if not renewing_am3 then
+        if target.hpp > hp_threshold then return blocked('Target HP is above threshold.') end
+        if (player.vitals.tp or 0) < 1000 then return blocked('Waiting for 1,000 TP.') end
+    end
     if not ws then return blocked('No weaponskill selected.') end
     local abilities = windower.ffxi.get_abilities()
     for _, id in pairs(abilities and abilities.weapon_skills or {}) do
         if id == ws.id then
-            return ws, context .. 'Ready to attempt WS.', target
+            return ws, context .. (renewing_am3 and 'Ready to apply AM3 at 3,000 TP.' or 'Ready to attempt WS.'), target
         end
     end
     return blocked(ws.en .. ' is not in the available weaponskill list.')
@@ -126,6 +167,7 @@ end
 
 local function help()
     message('//mh set ws <weaponskill name> | //mh set hp <1-100> | //mh start | //mh pause | //mh info | //mh debug')
+    message('//mh set am3 <on/off> | //mh set am3 <seconds>. ' .. am3_settings() .. '.')
     message('Use //mh set ws auto to clear your override. State: ' .. state
         .. '; HP: ' .. hp_threshold .. '%; WS: '
         .. (selected_ws and selected_ws.en or 'automatic (Mythic/Relic; main then ranged)') .. '.')
@@ -154,6 +196,19 @@ windower.register_event('addon command', function(...)
                 selected_ws = ws
                 message('Weaponskill set to ' .. ws.en .. '.')
             end
+        elseif setting == 'am3' then
+            local toggle = value:lower()
+            if toggle == 'on' or toggle == 'off' then
+                am3_enabled = toggle == 'on'
+            else
+                local seconds = tonumber(value)
+                if not value:match('^%d+$') or not seconds or seconds == math.huge then
+                    message('AM3 must be on, off, or a non-negative integer number of seconds.')
+                    return
+                end
+                am3_save_seconds = seconds
+            end
+            message(am3_settings() .. '. Requires an equipped Mythic weapon; changing seconds does not toggle AM3.')
         elseif setting == 'hp' then
             local hp = tonumber(value)
             if not value:match('^%d+$') or not hp or hp < 1 or hp > 100 then
@@ -185,10 +240,13 @@ windower.register_event('addon command', function(...)
         local ws = effective_ws()
         message('WS: ' .. (ws and ws.en or 'not set')
             .. (selected_ws and ' (manual)' or ' (automatic)')
-            .. '; HP: ' .. hp_threshold .. '%.')
+            .. '; HP: ' .. hp_threshold .. '%; ' .. am3_settings() .. '.')
     elseif command == 'debug' and #args == 1 then
         local _, report = check_ws()
         message(report)
+        local active, remaining = am3_status(windower.ffxi.get_player())
+        message(am3_settings() .. '; buff: ' .. (active and (remaining and ('%.0fs left'):format(remaining) or 'duration unknown') or 'absent')
+            .. '; Mythic WS: ' .. ((equipped_ws(mythic_defaults) or {}).en or 'none') .. '.')
         message('Last command sent: ' .. last_attempt)
     else
         help()
@@ -210,8 +268,43 @@ windower.register_event('prerender', function()
 
 end)
 
+-- Windower's incoming 0x063/0x09 contains 32 buff IDs and expiration times.
+-- See Windower/Lua addons/libs/packets/fields.lua. Times are 60Hz ticks
+-- since the game's epoch, wrapping at 2^32; resolve the wrap against now.
+local function unsigned_le(data, offset, size)
+    local value = 0
+    for i = size - 1, 0, -1 do
+        value = value * 256 + data:byte(offset + i)
+    end
+    return value
+end
+
+windower.register_event('incoming chunk', function(id, data, modified, injected, blocked)
+    if id ~= 0x063 or injected or blocked or #data < 200 or data:byte(5) ~= 0x09 then return end
+    am3_expires_at = nil
+    for slot = 0, 31 do
+        if unsigned_le(data, 9 + slot * 2, 2) == AM3_BUFF_ID then
+            local ticks = unsigned_le(data, 73 + slot * 4, 4)
+            local now = os.time()
+            local current_ticks = ((now - 1009810800) * 60) % 4294967296
+            local delta = (ticks - current_ticks + 2147483648) % 4294967296 - 2147483648
+            am3_expires_at = now + delta / 60
+            return
+        end
+    end
+end)
+
+windower.register_event('lose buff', function(id)
+    if id == AM3_BUFF_ID then am3_expires_at = nil end
+end)
+
+windower.register_event('zone change', function()
+    am3_expires_at = nil
+end)
+
 windower.register_event('logout', function()
     state = 'off'
+    am3_expires_at = nil
 end)
 
 windower.register_event('load', function()
