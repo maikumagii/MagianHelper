@@ -1,56 +1,62 @@
 # MagianHelper
 
-A Windower 4 addon that attempts a weaponskill against your engaged target when its HP is at or below your threshold.
+MagianHelper is a Windower 4 addon for working on Magian weaponskill trials. Pick a weaponskill and an enemy HP percentage, and it will use that WS when your engaged target reaches that percentage or lower.
 
-## Install
+For example, you can have it use Atonement once your target drops to 25% HP. It checks once per second and waits until you have at least 1,000 TP. You still need to be in range and able to use the weaponskill normally.
 
-Copy `MagianHelper.lua` into `Windower4/addons/MagianHelper/`, then run:
+## Getting started
+
+Download `MagianHelper.lua` and place it in your Windower folder at `addons/MagianHelper/MagianHelper.lua`. Then load it in game:
 
 ```text
 //lua load MagianHelper
+```
+
+The shorthand for MagianHelper is `mh`. To use Atonement at 25% enemy HP, enter:
+
+```text
 //mh set ws Atonement
 //mh set hp 25
 //mh start
 ```
 
-Use `//mh pause` to stop. The addon starts paused, with a 100% HP threshold. Settings are held in memory and reset on reload.
+MagianHelper starts paused whenever you load it. The default HP threshold is 100%, so set a lower value if you want to save TP until the enemy is closer to dying.
+
+When you're finished, use `//mh pause`. Your WS and HP settings stay in place until you reload or unload the addon; they aren't saved between sessions. Logging out also pauses it.
 
 ## Commands
 
-| Command | Effect |
+| Command | What it does |
 | --- | --- |
-| `//mh set ws <weaponskill name>` | Set an explicit WS, overriding automatic selection. Names are case insensitive; quotes around multiword names are optional. |
-| `//mh set hp <1-100>` | Set the inclusive HP percentage threshold. |
-| `//mh start` | Turn `state` on; requires an explicit WS or a recognized main-hand/ranged weapon. |
-| `//mh pause` | Turn `state` off. |
-| `//mh info` | Display the current WS (manual or automatically selected) and HP threshold. Shows `not set` when no WS can be selected. |
+| `//mh set ws <name>` | Choose a weaponskill, such as `//mh set ws King's Justice`. |
+| `//mh set hp <1-100>` | Choose the enemy HP percentage at which to start using your WS. |
+| `//mh start` | Start watching your engaged target. |
+| `//mh pause` | Stop using weaponskills automatically. |
+| `//mh info` | Show your current WS and HP threshold. |
+| `//mh set ws auto` | Let your equipped weapon choose the WS again. |
+| `//mh` | Show help and settings. |
 
-`//mh` displays help and settings. `//mh set ws auto` clears the explicit WS and restores automatic selection.
+Use the full English weaponskill name. Capitalization doesn't matter, and quotes around names with spaces are optional.
 
-## Behavior
+## Let your weapon choose the WS
 
-- Checks once per second while running, starting one second after `start`.
-- Requires you to be engaged, alive, and have at least 1,000 TP, with a living, valid NPC target at or below the threshold.
-- Checks that the selected WS is in your currently available weaponskill list before sending the command.
-- Continues attempting once per second while these conditions hold. This is not limited to one WS per enemy. A failed attempt (for example, out of range or during another action) can be retried on the next check. Normal game restrictions still apply.
-- Pausing stops further attempts; it cannot retract a command already sent. Logging out also pauses the addon.
-- Automatic selection supports **all 20 Mythic weapons and 14 Relic weapons** with associated weaponskills. It rechecks the equipped items and their actual inventory/wardrobe bags, so weapon swaps are respected.
-- Selection priority: **explicit WS → mapped main-hand weapon → mapped ranged weapon**. Offhand weapons are ignored. If both main and ranged are mapped, use an explicit WS to choose the ranged trial. If the chosen WS is unavailable, the addon waits; it does not substitute a different WS.
-- Ranged weaponskills still require engagement and suitable ammunition under the game's normal rules. Self-targeting weaponskills are not supported.
-- Add more mappings to `weapon_defaults` near the top of the Lua file using exact English item and WS names. An explicit WS always takes priority, even after changing weapons.
+If you have a Mythic or Relic weapon equipped, you can skip setting a WS. For example, with Burtgang in your main hand:
 
-## Automatic weapon coverage
+```text
+//mh set hp 25
+//mh start
+```
 
-The complete `weapon_defaults` table is near the top of `MagianHelper.lua`. Examples include Conqueror → King's Justice, Nirvana → Garland of Bliss, Death Penalty → Leaden Salute, Excalibur → Knights of Round, and Annihilator → Coronach.
+MagianHelper will choose Atonement for you. Automatic selection covers all 20 Mythic weapons and all 14 Relic weapons with an associated weaponskill, including ranged weapons. Other examples are Conqueror with King's Justice, Nirvana with Garland of Bliss, and Annihilator with Coronach.
 
-Names match all upgrade stages that retain the same Windower English item name. The Relic shield and instrument (Aegis and Gjallarhorn) have no associated WS and are omitted. Empyrean weapons, Ergon weapons, Vigil weapons, unfinished Relic precursors, and earlier Magian/Walk of Echoes weapons are not automatically mapped.
+Your own WS choice always takes priority. Otherwise, MagianHelper checks your main hand first, then your ranged slot, and follows equipment changes as you play. If both slots have a supported weapon, choose the ranged WS yourself when you want to work on that trial. Offhand weapons don't affect the choice.
 
-This selects the weapon's signature WS, not a WS inferred from your active trial. Relic/Mythic upgrades include WS-use and WS-finishing-blow trials. Empyrean weapons are excluded because their upgrade trials use different objectives. Set a different WS manually when your trial calls for one. The addon does not track trial progress or guarantee a finishing blow.
+Use `//mh info` to see which WS it has selected. If it shows `not set`, choose one with `//mh set ws <name>` before starting. If the chosen WS isn't currently available to you, MagianHelper waits.
 
-Weapon/WS associations: [Square Enix's weapon upgrade tables](https://forum.square-enix.com/ffxi/threads/19515) and the [Mythic weapon list](https://ffxiclopedia.fandom.com/wiki/Category:Mythic_Weapons). Trial background: [Empyrean weapons](https://www.bg-wiki.com/ffxi/Category:Empyrean_Weapons).
+Empyrean weapons aren't included because their upgrade trials use different objectives. Ergon weapons, Vigil weapons, and unfinished weapon precursors also need a manual WS choice. Shields and instruments have no associated WS, and self-targeting weaponskills aren't supported.
 
-## Validation
+## A few things to keep in mind
 
-Run the mocked behavior checks from this folder with `lua tests/test_magianhelper.lua`. Actual combat execution still needs an in-game check on Windower 4.
+MagianHelper keeps using your WS as TP becomes available while the target stays at or below your chosen HP percentage. It doesn't stop after one WS per enemy. If an attempt fails because you're out of range or busy with another action, it can try again on the next check. Ranged weaponskills also need suitable ammunition, and you must remain engaged.
 
-API references: [Windower FFXI functions](https://github.com/Windower/Lua/wiki/FFXI-Functions), [Windower events](https://github.com/Windower/Lua/wiki/Events), and [weaponskill resources](https://github.com/Windower/Resources/blob/master/resources_data/weapon_skills.lua).
+For finishing-blow trials, you'll need to find an HP threshold that works for your damage and the enemies you're fighting. MagianHelper doesn't read your active trial, count progress, or guarantee that your WS lands the killing blow. Check your trial's requirements and choose a different WS manually if needed.

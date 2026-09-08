@@ -1,6 +1,6 @@
 _addon.name = 'MagianHelper'
-_addon.author = 'mcgee'
-_addon.version = '1.2.0'
+_addon.author = 'maikumagii'
+_addon.version = '1.2.1'
 _addon.commands = {'mh', 'magianhelper'}
 
 local res = require('resources')
