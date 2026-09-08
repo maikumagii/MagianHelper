@@ -2,7 +2,7 @@
 
 MagianHelper is a Windower 4 addon for working on Magian weaponskill trials. Pick a weaponskill and an enemy HP percentage, and it will use that WS when your engaged target reaches that percentage or lower.
 
-For example, you can have it use Atonement once your target drops to 25% HP. It checks once per second and waits until you have at least 1,000 TP. You still need to be in range and able to use the weaponskill normally.
+For example, you can have it use Atonement once your target drops to 25% HP. It checks every half second and waits until you have at least 1,000 TP. You still need to be in range and able to use the weaponskill normally.
 
 ## Getting started
 
@@ -32,7 +32,7 @@ When you're finished, use `//mh pause`. Your WS and HP settings stay in place un
 | `//mh set hp <1-100>` | Choose the enemy HP percentage at which to start using your WS. |
 | `//mh start` | Start watching your engaged target. |
 | `//mh pause` | Stop using weaponskills automatically. |
-| `//mh info` | Show your current WS and HP threshold. |
+| `//mh info` | Show your selected WS and HP threshold. |
 | `//mh set ws auto` | Let your equipped weapon choose the WS again. |
 | `//mh` | Show help and settings. |
 

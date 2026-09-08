@@ -1,6 +1,6 @@
 _addon.name = 'MagianHelper'
 _addon.author = 'maikumagii'
-_addon.version = '1.2.1'
+_addon.version = '1.2.2'
 _addon.commands = {'mh', 'magianhelper'}
 
 local res = require('resources')
@@ -9,6 +9,7 @@ local state = 'off'
 local hp_threshold = 100
 local selected_ws = nil
 local last_check = os.clock()
+local last_attempt = 'none'
 
 -- Add exact English item names and weaponskill names here as needed.
 -- Matching by name covers upgrade stages that retain the same item name.
@@ -92,8 +93,39 @@ local function effective_ws()
     end
 end
 
+-- Use the same live checks for firing and for //mh debug diagnostics.
+local function check_ws()
+    local info = windower.ffxi.get_info()
+    if not info or not info.logged_in then return nil, 'Not logged in.' end
+    local player = windower.ffxi.get_player()
+    local target = windower.ffxi.get_mob_by_target('t')
+    local context = ('TP: %s; target: %s; target HP: %s%%. '):format(
+        player and player.vitals and player.vitals.tp or 'unknown',
+        target and target.name or 'none', target and target.hpp or 'unknown')
+    local function blocked(reason) return nil, context .. reason end
+    if state ~= 'on' then return blocked('Paused.') end
+    if not player or not player.vitals then return blocked('Player data unavailable.') end
+    if player.status ~= 1 then return blocked('Not engaged.') end
+    if (player.vitals.hp or 0) <= 0 then return blocked('Player is KO.') end
+    if not target or not target.valid_target or not target.is_npc then
+        return blocked('No valid enemy target.')
+    end
+    if not target.hpp or target.hpp <= 0 then return blocked('Target is dead or HP is unknown.') end
+    if target.hpp > hp_threshold then return blocked('Target HP is above threshold.') end
+    if (player.vitals.tp or 0) < 1000 then return blocked('Waiting for 1,000 TP.') end
+    local ws = effective_ws()
+    if not ws then return blocked('No weaponskill selected.') end
+    local abilities = windower.ffxi.get_abilities()
+    for _, id in pairs(abilities and abilities.weapon_skills or {}) do
+        if id == ws.id then
+            return ws, context .. 'Ready to attempt WS.', target
+        end
+    end
+    return blocked(ws.en .. ' is not in the available weaponskill list.')
+end
+
 local function help()
-    message('//mh set ws <weaponskill name> | //mh set hp <1-100> | //mh start | //mh pause | //mh info')
+    message('//mh set ws <weaponskill name> | //mh set hp <1-100> | //mh start | //mh pause | //mh info | //mh debug')
     message('Use //mh set ws auto to clear your override. State: ' .. state
         .. '; HP: ' .. hp_threshold .. '%; WS: '
         .. (selected_ws and selected_ws.en or 'automatic (Mythic/Relic; main then ranged)') .. '.')
@@ -154,6 +186,10 @@ windower.register_event('addon command', function(...)
         message('WS: ' .. (ws and ws.en or 'not set')
             .. (selected_ws and ' (manual)' or ' (automatic)')
             .. '; HP: ' .. hp_threshold .. '%.')
+    elseif command == 'debug' and #args == 1 then
+        local _, report = check_ws()
+        message(report)
+        message('Last command sent: ' .. last_attempt)
     else
         help()
     end
@@ -162,34 +198,16 @@ end)
 windower.register_event('prerender', function()
     if state ~= 'on' then return end
     local now = os.clock()
-    if now - last_check < 1 then return end
+    if now - last_check < 0.5 then return end
     last_check = now
 
-    local info = windower.ffxi.get_info()
-    if not info or not info.logged_in then return end
-    local player = windower.ffxi.get_player()
-    if not player or player.status ~= 1 or not player.vitals
-        or (player.vitals.hp or 0) <= 0 or (player.vitals.tp or 0) < 1000 then
-        return
-    end
-    -- Resolve the engaged player's target, not a party member's battle target.
-    local me = windower.ffxi.get_mob_by_target('me')
-    if not me or not me.target_index or me.target_index == 0 then return end
-    local target = windower.ffxi.get_mob_by_index(me.target_index)
-    if not target or not target.valid_target or not target.is_npc
-        or not target.hpp or target.hpp <= 0 or target.hpp > hp_threshold then
-        return
-    end
-    local ws = effective_ws()
+    local ws, _, target = check_ws()
     if not ws then return end
-    local abilities = windower.ffxi.get_abilities()
-    for _, id in pairs(abilities and abilities.weapon_skills or {}) do
-        if id == ws.id then
-            -- An explicit ID keeps the command aimed at the enemy just checked.
-            windower.send_command(('input /ws "%s" %d'):format(ws.en, target.id))
-            return
-        end
-    end
+    -- Use the same current target checked above, through FFXI's normal target token.
+    windower.send_command(('input /ws "%s" <t>'):format(ws.en))
+    last_attempt = ('%s on %s at %d%% HP (threshold %d%%).'):format(
+        ws.en, target.name or 'target', target.hpp, hp_threshold)
+
 end)
 
 windower.register_event('logout', function()
