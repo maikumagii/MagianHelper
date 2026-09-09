@@ -1,6 +1,6 @@
 _addon.name = 'MagianHelper'
 _addon.author = 'maikumagii'
-_addon.version = '1.3.0'
+_addon.version = '1.4.0'
 _addon.commands = {'mh', 'magianhelper'}
 
 local res = require('resources')
@@ -14,6 +14,9 @@ local am3_enabled = false
 local am3_save_seconds = 15
 local am3_expires_at = nil
 local AM3_BUFF_ID = 272
+local auto_engage = false
+local auto_face = false
+local last_combat_check = os.clock()
 
 -- Add exact English item names and weaponskill names here as needed.
 -- Matching by name covers upgrade stages that retain the same item name.
@@ -116,6 +119,45 @@ local function am3_settings()
     return ('AM3: %s; save window: %ss'):format(am3_enabled and 'on' or 'off', tostring(am3_save_seconds))
 end
 
+local function combat_settings()
+    return ('Auto-engage: %s; auto-face: %s'):format(
+        auto_engage and 'on' or 'off', auto_face and 'on' or 'off')
+end
+
+local function check_combat()
+    if state ~= 'on' then return nil, 'Paused.' end
+    local info = windower.ffxi.get_info()
+    if not info or not info.logged_in then return nil, 'Not logged in.' end
+    local player = windower.ffxi.get_player()
+    if not player or not player.vitals then return nil, 'Player data unavailable.' end
+    if (player.vitals.hp or 0) <= 0 then return nil, 'Player is KO.' end
+    if player.status ~= 0 and player.status ~= 1 then return nil, 'Player is not idle or engaged.' end
+    local target = windower.ffxi.get_mob_by_target('t')
+    -- Trusts are NPCs too; spawn type 16 identifies monsters.
+    if not target or not target.valid_target or not target.is_npc or target.spawn_type ~= 16 then
+        return nil, 'Waiting for a monster as the current target (Cancel clears a friendly target).'
+    end
+    if not target.hpp or target.hpp <= 0 then return nil, 'Target is dead or HP is unknown.' end
+    return target, player.status == 1 and 'Engaged; auto-engage waits.' or 'Idle; ready to attempt engage.', player
+end
+
+local function update_combat()
+    if not auto_engage and not auto_face then return end
+    local target, _, player = check_combat()
+    if not target then return end
+    if auto_engage and player.status == 0 then
+        -- Keep the game's current selection so controller Cancel remains authoritative.
+        -- Explicit "on" cannot toggle an engagement off if status changes meanwhile.
+        windower.send_command('input /attack on <t>')
+    elseif auto_face and player.status == 1 then
+        local me = windower.ffxi.get_mob_by_target('me')
+        if not me or not me.x or not me.y or not target.x or not target.y then return end
+        local dx, dy = target.x - me.x, target.y - me.y
+        if dx == 0 and dy == 0 then return end
+        windower.ffxi.turn(-math.atan2(dy, dx))
+    end
+end
+
 -- Use the same live checks for firing and for //mh debug diagnostics.
 local function check_ws()
     local info = windower.ffxi.get_info()
@@ -167,7 +209,8 @@ end
 
 local function help()
     message('//mh set ws <weaponskill name> | //mh set hp <1-100> | //mh start | //mh pause | //mh info | //mh debug')
-    message('//mh set am3 <on/off> | //mh set am3 <seconds>. ' .. am3_settings() .. '.')
+    message('//mh set am3 [on/off] | //mh set am3 <seconds>. ' .. am3_settings() .. '.')
+    message('//mh set engage [on/off] | //mh set face [on/off]. Omit on/off to toggle. ' .. combat_settings() .. '.')
     message('Use //mh set ws auto to clear your override. State: ' .. state
         .. '; HP: ' .. hp_threshold .. '%; WS: '
         .. (selected_ws and selected_ws.en or 'automatic (Mythic/Relic; main then ranged)') .. '.')
@@ -198,7 +241,9 @@ windower.register_event('addon command', function(...)
             end
         elseif setting == 'am3' then
             local toggle = value:lower()
-            if toggle == 'on' or toggle == 'off' then
+            if toggle == '' then
+                am3_enabled = not am3_enabled
+            elseif toggle == 'on' or toggle == 'off' then
                 am3_enabled = toggle == 'on'
             else
                 local seconds = tonumber(value)
@@ -208,7 +253,22 @@ windower.register_event('addon command', function(...)
                 end
                 am3_save_seconds = seconds
             end
-            message(am3_settings() .. '. Requires an equipped Mythic weapon; changing seconds does not toggle AM3.')
+            message(am3_settings() .. '.')
+        elseif setting == 'engage' or setting == 'face' then
+            local toggle = value:lower()
+            if toggle ~= '' and toggle ~= 'on' and toggle ~= 'off' then
+                message('Use //mh set ' .. setting .. ' [on/off]; omit on/off to toggle.')
+                return
+            end
+            if setting == 'engage' then
+                if toggle == '' then auto_engage = not auto_engage
+                else auto_engage = toggle == 'on' end
+                message('Auto-engage: ' .. (auto_engage and 'on' or 'off') .. '.')
+            else
+                if toggle == '' then auto_face = not auto_face
+                else auto_face = toggle == 'on' end
+                message('Auto-face: ' .. (auto_face and 'on' or 'off') .. '.')
+            end
         elseif setting == 'hp' then
             local hp = tonumber(value)
             if not value:match('^%d+$') or not hp or hp < 1 or hp > 100 then
@@ -222,7 +282,7 @@ windower.register_event('addon command', function(...)
         end
     elseif command == 'start' and #args == 1 then
         local ws = effective_ws()
-        if not ws then
+        if not ws and not auto_engage and not auto_face then
             message('Set a weaponskill first with //mh set ws <name>, or equip a mapped weapon.')
             return
         end
@@ -232,7 +292,8 @@ windower.register_event('addon command', function(...)
         end
         state = 'on'
         last_check = os.clock()
-        message('Started: ' .. ws.en .. ' at or below ' .. hp_threshold .. '% HP.')
+        last_combat_check = last_check
+        message('Started.')
     elseif command == 'pause' and #args == 1 then
         state = 'off'
         message('Paused.')
@@ -240,14 +301,16 @@ windower.register_event('addon command', function(...)
         local ws = effective_ws()
         message('WS: ' .. (ws and ws.en or 'not set')
             .. (selected_ws and ' (manual)' or ' (automatic)')
-            .. '; HP: ' .. hp_threshold .. '%; ' .. am3_settings() .. '.')
+            .. '; HP: ' .. hp_threshold .. '%; ' .. am3_settings() .. '; ' .. combat_settings() .. '; state: ' .. state .. '.')
     elseif command == 'debug' and #args == 1 then
         local _, report = check_ws()
         message(report)
         local active, remaining = am3_status(windower.ffxi.get_player())
         message(am3_settings() .. '; buff: ' .. (active and (remaining and ('%.0fs left'):format(remaining) or 'duration unknown') or 'absent')
             .. '; Mythic WS: ' .. ((equipped_ws(mythic_defaults) or {}).en or 'none') .. '.')
-        message('Last command sent: ' .. last_attempt)
+        message('Last WS command sent: ' .. last_attempt)
+        local _, combat_report = check_combat()
+        message(combat_settings() .. '. ' .. combat_report)
     else
         help()
     end
@@ -256,6 +319,10 @@ end)
 windower.register_event('prerender', function()
     if state ~= 'on' then return end
     local now = os.clock()
+    if now - last_combat_check >= 1 then
+        last_combat_check = now
+        update_combat()
+    end
     if now - last_check < 0.5 then return end
     last_check = now
 
@@ -305,8 +372,4 @@ end)
 windower.register_event('logout', function()
     state = 'off'
     am3_expires_at = nil
-end)
-
-windower.register_event('load', function()
-    message('Loaded and paused. HP threshold: 100%. Use //mh for commands.')
 end)
