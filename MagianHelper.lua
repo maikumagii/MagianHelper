@@ -133,9 +133,18 @@ local function check_combat()
     if (player.vitals.hp or 0) <= 0 then return nil, 'Player is KO.' end
     if player.status ~= 0 and player.status ~= 1 then return nil, 'Player is not idle or engaged.' end
     local target = windower.ffxi.get_mob_by_target('t')
+    if not target or not target.valid_target then return nil, 'Waiting for a valid current target.' end
     -- Trusts are NPCs too; spawn type 16 identifies monsters.
-    if not target or not target.valid_target or not target.is_npc or target.spawn_type ~= 16 then
-        return nil, 'Waiting for a monster as the current target (Cancel clears a friendly target).'
+    if not target.is_npc or target.spawn_type ~= 16 then
+        if auto_engage and player.status == 0
+            and (target.is_npc == false or (target.spawn_type ~= nil and target.spawn_type ~= 16)) then
+            -- Escape must not dismiss chat or a menu instead of clearing the target.
+            if info.menu_open or info.chat_open then
+                return nil, 'Waiting for chat/menu to close before clearing a friendly target.'
+            end
+            return nil, 'Ready to clear a friendly target.', player, true
+        end
+        return nil, 'Waiting for a monster as the current target.'
     end
     if not target.hpp or target.hpp <= 0 then return nil, 'Target is dead or HP is unknown.' end
     return target, player.status == 1 and 'Engaged; auto-engage waits.' or 'Idle; ready to attempt engage.', player
@@ -143,10 +152,16 @@ end
 
 local function update_combat()
     if not auto_engage and not auto_face then return end
-    local target, _, player = check_combat()
+    local target, _, player, clear_target = check_combat()
+    if clear_target then
+        -- Reproduce a brief Cancel press, then wait for a fresh game-selected target.
+        -- Queue the release with the press so pausing the addon cannot leave it held.
+        windower.send_command('setkey escape down; wait 0.1; setkey escape up')
+        return
+    end
     if not target then return end
     if auto_engage and player.status == 0 then
-        -- Keep the game's current selection so controller Cancel remains authoritative.
+        -- Attack the game's current monster selection, without choosing from the pack.
         -- Explicit "on" cannot toggle an engagement off if status changes meanwhile.
         windower.send_command('input /attack on <t>')
     elseif auto_face and player.status == 1 then
